@@ -1,15 +1,16 @@
 import { AmazonSelectors } from "../../../../interfaces/selectors.interface";
 
 export const amazonSelectors: AmazonSelectors = {
-  orderCards: `div.order.js-order-card`,
-  invoiceSpans: `span.hide-if-no-js .a-declarative[data-action="a-popover"]`,
-  orderNr: `.yohtmlc-order-id span:nth-last-child(1) bdi`,
+  orderCards: `div.order-card.js-order-card`,
+  invoiceSpans: `li.yohtmlc-order-level-connections span.a-declarative[data-action="a-popover"]`,
+  orderNr: `.yohtmlc-order-id span:nth-last-child(1)`,
   orderDate: `.a-column .a-row:nth-last-child(1) span`,
-  popover: `#a-popover-content-{{index}}`,
+  orderStatus: `div.yohtmlc-shipment-status-primaryText span`,
+  popover: `.a-popover:not(.a-popover-hidden) .a-popover-inner`,
   invoiceList: `ul.invoice-list`,
-  invoiceLinks: `a[href*="invoice.pdf"]`,
+  invoiceLinks: `a[href*="invoice"]`,
   pagination: `ul.a-pagination li.a-normal:nth-last-child(2) a`,
-  yearFilter: `select[name='orderFilter']#orderFilter`,
+  yearFilter: `select[name='timeFilter']#time-filter`,
   authError: `#auth-error-message-box .a-unordered-list li`,
   authWarning: `#auth-warning-message-box .a-unordered-list li`,
   // captchaImage: `div.cvf-captcha-img img[alt~="captcha"]`,

@@ -76,16 +76,38 @@ export const login = async (
     checkForAuthMessages(`Error`);
     checkForAuthMessages(`Warning`);
 
-    if (page.url().indexOf(`/mfa?`) > -1) {
-      logger.info(`MFA detected`);
-      // const secondFactor = await ux.prompt(`What is your two-factor token?`, {
-      //   type: `mask`,
-      // });
-      // await page.type(`input#auth-mfa-otpcode`, secondFactor);
-      await page.click(`input#auth-mfa-remember-device`);
-      await page.click(`input[type=submit]`);
+    if (page.url().indexOf(`/mfa`) > -1 || page.url().indexOf(`/ap/cvf`) > -1 || page.url().indexOf(`/ap/challenge`) > -1) {
+      logger.info(`MFA/verification detected. Please complete the verification in the browser window...`);
 
-      await page.waitForNavigation();
+      // Wait for the user to manually complete MFA/verification in the browser
+      // by polling until the URL no longer contains MFA/verification paths
+      const mfaTimeout = 120000; // 2 minutes to complete MFA
+      const pollInterval = 2000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < mfaTimeout) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        const currentUrl = page.url();
+        if (
+          currentUrl.indexOf(`/mfa`) === -1 &&
+          currentUrl.indexOf(`/ap/cvf`) === -1 &&
+          currentUrl.indexOf(`/ap/challenge`) === -1 &&
+          currentUrl.indexOf(`/ap/signin`) === -1
+        ) {
+          logger.info(`MFA/verification completed successfully.`);
+          break;
+        }
+        logger.debug(`Still waiting for MFA/verification... (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
+      }
+
+      if (
+        page.url().indexOf(`/mfa`) > -1 ||
+        page.url().indexOf(`/ap/cvf`) > -1 ||
+        page.url().indexOf(`/ap/challenge`) > -1
+      ) {
+        logger.error(`MFA/verification timed out after ${mfaTimeout / 1000}s. Exiting.`);
+        return false;
+      }
     }
     logger.info(`Logged in`);
     return true;

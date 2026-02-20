@@ -3,6 +3,7 @@ export interface AmazonSelectors {
   invoiceSpans: string,
   orderNr: string,
   orderDate: string,
+  orderStatus: string,
   popover: string,
   invoiceList: string,
   invoiceLinks: string,

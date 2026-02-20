@@ -29,7 +29,7 @@ export abstract class ScrapeCommand<
     `--disable-setuid-sandbox`,
   ];
 
-  public selectorWaitTimeout = 2000;
+  public selectorWaitTimeout = 30000;
 
   protected flags!: ScrapeFlags<T>;
   static baseFlags = {

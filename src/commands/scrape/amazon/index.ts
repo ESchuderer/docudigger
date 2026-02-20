@@ -119,7 +119,7 @@ export default class Amazon extends ScrapeCommand<typeof Amazon> {
       }
       this.logger.debug(`Got ${orderPageCount} for year ${currentYear}`);
 
-      for (const orderPage of [...Array(orderPageCount).keys()].map(pageNo => pageNo + 1)) {
+      for (const orderPage of [...Array(orderPageCount).keys()]) {
         if (this.options.pageFilter && orderPage != this.options.pageFilter) {
           this.logger.info(`Skipping page ${orderPage} due to page filter`);
           continue;
@@ -149,7 +149,11 @@ export default class Amazon extends ScrapeCommand<typeof Amazon> {
 
     for (const [orderIndex, orderCard] of orderCards.entries()) {
       const { orderNumber, order } = await this.getOrder(orderCard);
-      await this.clickInvoiceSpan(orderCard, orderIndex);
+      const skipped = await this.clickInvoiceSpan(orderCard, orderIndex, order.status);
+      if (skipped) {
+        this.logger.info(`Order ${orderNumber} has no invoice (status: ${order.status}). Skipping.`);
+        continue;
+      }
       const invoiceUrls = await this.getInvoiceUrls(orderIndex);
 
       if (this.options.onlyNew && (orderNumber == this.lastScrapeWithInvoices?.number)) {
@@ -189,14 +193,19 @@ export default class Amazon extends ScrapeCommand<typeof Amazon> {
 
   private async goToYearAndPage(year: number, orderPage: number, amazon: AmazonDefinition): Promise<HTTPResponse> {
     this.logger.debug(`Going to year... ${year} order page ${orderPage}`);
-    const nextPageUrl = new URL(`?ie=UTF8&orderFilter=year-${year}&search=&startIndex=${10 * (orderPage)}`, amazon.orderPage);
+    const nextPageUrl = new URL(`?ie=UTF8&timeFilter=year-${year}&search=&startIndex=${10 * (orderPage)}&ref_=ppx_yo2ov_dt_b_filter_all_y${year}`, amazon.orderPage);
     return await this.currentPage.goto(nextPageUrl.toString());
   }
 
-  private async clickInvoiceSpan(orderCard: ElementHandle<Element>, orderIndex: number): Promise<void> {
+  private async clickInvoiceSpan(orderCard: ElementHandle<Element>, orderIndex: number, orderStatus?: string): Promise<boolean> {
     const invoiceSpan = await orderCard.$(this.selectors.invoiceSpans);
-    invoiceSpan.click();
+    if (invoiceSpan === null) {
+      this.logger.warn(`No invoice button found for order (status: ${orderStatus}). Skipping this order.`);
+      return true;
+    }
+    await invoiceSpan.click();
     this.logger.debug(`Checking popover ${orderIndex + 1}`);
+    return false;
   }
 
   private getInvoices(invoiceUrls: string[], orderIndex: number): Invoice[] {
@@ -266,16 +275,34 @@ export default class Amazon extends ScrapeCommand<typeof Amazon> {
   private async getInvoiceUrls(orderIndex: number): Promise<string[]> {
     this.logger.debug(`Getting invoice urls...`);
     let invoiceUrls: string[] = [];
-    const popoverSelectorResolved = this.selectors.popover.replace(`{{index}}`, (orderIndex + 1).toString());
 
     try {
-      const popover = await this.currentPage.waitForSelector(popoverSelectorResolved, { timeout: this.selectorWaitTimeout });
-      this.logger.debug(`Got popover ${(orderIndex + 1)} -> ${popover}`);
-      const invoiceList = await popover.waitForSelector(this.selectors.invoiceList, { timeout: this.selectorWaitTimeout });
-      invoiceUrls = await invoiceList.$$eval(this.selectors.invoiceLinks, (handles: HTMLAnchorElement[]) => handles.map(a => a.href));
+      // Wait for a visible popover with an invoice list (don't rely on index-based IDs)
+      const invoiceListSelector = `${this.selectors.popover} ${this.selectors.invoiceList}`;
+      this.logger.debug(`Waiting for invoice list with selector: ${invoiceListSelector}`);
+      const invoiceList = await this.currentPage.waitForSelector(invoiceListSelector, { timeout: this.selectorWaitTimeout });
+      this.logger.debug(`Got invoice list for order ${(orderIndex + 1)}`);
+
+      // Get all invoice PDF links from the popover
+      invoiceUrls = await invoiceList.$$eval(this.selectors.invoiceLinks, (handles: HTMLAnchorElement[]) => {
+        return handles
+          .filter(a => a.href.includes(`invoice.pdf`) || a.href.includes(`/documents/download/`))
+          .map(a => a.href);
+      });
       this.logger.debug(`Got invoiceUrls ${(orderIndex + 1)} -> ${invoiceUrls}`);
+
+      // Close the popover by clicking the close button so it doesn't interfere with the next order
+      try {
+        const closeButton = await this.currentPage.$(`${this.selectors.popover} button[data-action="a-popover-close"]`);
+        if (closeButton) {
+          await closeButton.click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      } catch {
+        this.logger.debug(`Could not close popover, continuing...`);
+      }
     } catch (ex) {
-      this.logger.error(`Couldn't get popover ${popoverSelectorResolved} within ${this.selectorWaitTimeout}ms. Skipping. ${ex.message}`);
+      this.logger.error(`Couldn't get invoice popover for order ${orderIndex + 1} within ${this.selectorWaitTimeout}ms. Skipping. ${ex.message}`);
     }
     return invoiceUrls;
   }
@@ -286,12 +313,19 @@ export default class Amazon extends ScrapeCommand<typeof Amazon> {
       const orderNumber: string = await orderCard.$eval(this.selectors.orderNr, (handle: HTMLElement) => handle.innerText.trim());
       this.logger.info(`Order number: ${orderNumber}`);
       const orderDate = await orderCard.$eval(this.selectors.orderDate, (handle: HTMLElement) => handle.innerText);
+      let orderStatus: string | undefined;
+      try {
+        orderStatus = await orderCard.$eval(this.selectors.orderStatus, (handle: HTMLElement) => handle.innerText.trim());
+      } catch {
+        this.logger.debug(`Could not get order status for order ${orderNumber}`);
+      }
       const orderDateLuxon = DateTime.fromFormat(orderDate, `DDD`, { locale: this.definition.lang }).toISODate();
       const order: Scrape = {
         date: orderDateLuxon,
         datePlain: orderDate,
         invoices: [],
-        number: orderNumber
+        number: orderNumber,
+        status: orderStatus
       };
       this.logger.debug(`Got Order: ${orderNumber}`);
       this.logger.info(`Order date: ${orderDate}`);
